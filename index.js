@@ -2,7 +2,7 @@ const express = require('express')
 const cors = require('cors');
 const app = express()
 require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 3000
 
 
@@ -33,13 +33,30 @@ async function run() {
 
     //  loans api
     app.get('/loans',async(req,res)=>{
+        const query ={}
+        const {email} = req.query;
+        if(email){
+          query.email = email;
+        }
 
+        const cursor = loansCollection.find(query);
+        const result = await cursor.toArray();
+        res.send(result)
     })
 
     app.post('/loans',async(req,res)=>{
         const loan = req.body;
         const result = await loansCollection.insertOne(loan);
         res.send(result)
+    })
+
+
+    app.delete('/loans/:id',async(req,res)=>{
+      const id = req.params.id;
+      const query = {_id: new ObjectId(id)}
+
+      const result = await loansCollection.deleteOne(query);
+      res.send(result);
     })
 
 
