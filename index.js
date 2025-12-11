@@ -28,9 +28,19 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
+    const db =  client.db('loan_link_db');
+    const loansCollection = db.collection('loans');
 
+    //  loans api
+    app.get('/loans',async(req,res)=>{
 
+    })
 
+    app.post('/loans',async(req,res)=>{
+        const loan = req.body;
+        const result = await loansCollection.insertOne(loan);
+        res.send(result)
+    })
 
 
 
