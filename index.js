@@ -3,6 +3,9 @@ const cors = require('cors');
 const app = express()
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
+
 const port = process.env.PORT || 3000
 
 
@@ -66,6 +69,101 @@ async function run() {
       res.send(result);
     })
 
+    // payment checkout session
+
+    // new
+
+     app.post("/payment-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.cost) * 100;
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: amount,
+              product_data: {
+                name: `Please pay for: ${paymentInfo.loanTitle}`,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        metadata: {
+          loanId: paymentInfo.loanId,
+          // trackingId: paymentInfo.trackingId,
+        },
+        customer_email: paymentInfo.email,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+      });
+
+      res.send({ url: session.url });
+    });
+
+     // old
+
+    // app.post('/create-checkout-session', async (req, res) =>{
+    //   const paymentInfo = req.body;
+    //   const amount = parseInt(paymentInfo.cost) * 100;
+    //  const session = await stripe.checkout.sessions.create({
+    //    line_items: [
+    //             {
+    //                 price_data: {
+    //                     currency: 'USD',
+    //                     unit_amount: amount,
+    //                     product_data: {
+    //                         name: `Please pay for: ${paymentInfo.loanTitle}`
+    //                     }
+    //                 },
+    //                 quantity: 1,
+    //             },
+    //         ],
+    //         customer_email: paymentInfo.email,
+    //         mode:'payment',
+    //          metadata: {
+    //             loanId: paymentInfo.loanId,
+    //             loanTitle: paymentInfo.loanTitle
+    //         },
+
+    //         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+    //         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+
+    //  })
+
+    //  console.log(session)
+    //  res.send({ url: session.url })
+
+    // })
+
+
+    // payment success
+
+   app.patch("/payment-success",async(req,res)=>{
+    const sessionId = req.query.session_id;
+    
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+      console.log('session retrieve', session)
+
+      if(session.payment_status === 'paid'){
+        const id = session.metadata.loanId;
+        const query = {_id: new ObjectId(id)}
+        const update = {
+          $set:{
+            applicationFeeStatus:'paid'
+          }
+        }
+        const result = await loansCollection.updateOne(query,update);
+        res.send(result)
+      }
+
+    res.send({success:false})
+
+
+
+   })
 
 
 
