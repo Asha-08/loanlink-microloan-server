@@ -33,6 +33,7 @@ async function run() {
 
     const db =  client.db('loan_link_db');
     const loansCollection = db.collection('loans');
+    const paymentCollection = db.collection('payments');
 
     //  loans api
     app.get('/loans',async(req,res)=>{
@@ -92,6 +93,7 @@ async function run() {
         mode: "payment",
         metadata: {
           loanId: paymentInfo.loanId,
+          loanTitle: paymentInfo.loanTitle,
           // trackingId: paymentInfo.trackingId,
         },
         customer_email: paymentInfo.email,
@@ -145,7 +147,20 @@ async function run() {
     
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-      console.log('session retrieve', session)
+      // console.log('session retrieve', session)
+       const transactionId = session.payment_intent;
+      const query = { transactionId: transactionId };
+
+      const paymentExist = await paymentCollection.findOne(query);
+
+      console.log(paymentExist);
+      if (paymentExist) {
+        return res.send({
+          message: "already exists",
+          transactionId,
+          // trackingId: paymentExist.trackingId,
+        });
+      }
 
       if(session.payment_status === 'paid'){
         const id = session.metadata.loanId;
@@ -156,12 +171,34 @@ async function run() {
           }
         }
         const result = await loansCollection.updateOne(query,update);
-        res.send(result)
+        // res.send(result)
+
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          loanId: session.metadata.loanId,
+          loanTitle: session.metadata.loanTitle,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+          // trackingId: trackingId,
+        };
+
+        if (session.payment_status === "paid"){
+          const resultPayment = await paymentCollection.insertOne(payment);
+
+          res.send({
+            success:true,
+            modifyLoan:result,paymentInfo:resultPayment,
+            transactionId: session.payment_intent,
+          })
+
+        }
+
       }
 
     res.send({success:false})
-
-
 
    })
 
