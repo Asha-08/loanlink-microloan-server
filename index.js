@@ -59,11 +59,30 @@ async function run() {
     const paymentCollection = db.collection("payments");
     const userCollection = db.collection("users");
 
+    // must be used after verfyFbToken middleware
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
     // user related api
 
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
+    });
+
+    // get role
+    app.get("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      res.send({ role: user?.role || "user" });
     });
 
     app.post("/users", async (req, res) => {
@@ -105,7 +124,7 @@ async function run() {
 
     // update user role
 
-    app.patch("/users/:id", verifyFBToken, async (req, res) => {
+    app.patch("/users/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       const status = req.body.status;
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -126,23 +145,27 @@ async function run() {
 
     // suspend user api
 
-    app.patch("/users/suspend/:id", async (req, res) => {
-      const id = req.params.id;
-      const { reason, feedback } = req.body;
+    app.patch(
+      "/users/suspend/:id",verifyFBToken,verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const { reason, feedback } = req.body;
 
-      const result = await userCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            status: "suspended",
-            suspendReason: reason,
-            suspendFeedback: feedback,
-          },
-        }
-      );
+        const result = await userCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "suspended",
+              role: "user",
+              suspendReason: reason,
+              suspendFeedback: feedback,
+            },
+          }
+        );
 
-      res.send(result);
-    });
+        res.send(result);
+      }
+    );
 
     //  loans api
     app.get("/loans", async (req, res) => {
