@@ -73,7 +73,32 @@ async function run() {
     // user related api
 
     app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
-      const result = await userCollection.find().toArray();
+      const { searchText, role, status } = req.query;
+      const query = {};
+      if (searchText) {
+       
+        query.$or = [
+          { displayName: { $regex: searchText, $options: "i" } },
+          { email: { $regex: searchText, $options: "i" } },
+        ];
+      }
+
+       // filter by role
+  if (role) {
+    query.role = role;
+  }
+
+  // filter by status
+  if (status) {
+    query.status = status;
+  }
+
+
+      const result = await userCollection
+      .find(query)
+      .sort({ createdAt: 1 })
+      .toArray();
+
       res.send(result);
     });
 
@@ -170,9 +195,14 @@ async function run() {
     //  loans api
     app.get("/loans", async (req, res) => {
       const query = {};
-      const { email } = req.query;
+      const { email,status } = req.query;
       if (email) {
         query.email = email;
+      }
+
+      if(status){
+        query.status = status
+
       }
 
       const cursor = loansCollection.find(query);
@@ -192,6 +222,29 @@ async function run() {
       const result = await loansCollection.insertOne(loan);
       res.send(result);
     });
+
+    app.patch("/loans/:id/status",async (req,res)=>{
+      const {id} = req.params;
+      const {status} = req.body;
+
+      if(!["approved","rejected"].includes(status)){
+        return res.status(400).send({message:"Invalid Status"});
+      }
+
+      const updateData = {status};
+      if(status === "approved"){
+        updateData.approveAt = new Date();
+      }
+
+      const result = await loansCollection.updateOne(
+          {_id:new ObjectId(id)},
+          {$set :updateData}
+      );
+
+
+     return res.send(result)
+
+    })
 
     app.delete("/loans/:id", async (req, res) => {
       const id = req.params.id;
@@ -298,6 +351,7 @@ async function run() {
         const update = {
           $set: {
             applicationFeeStatus: "paid",
+            status: 'pending',
           },
         };
         const result = await loansCollection.updateOne(query, update);
