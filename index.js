@@ -38,6 +38,7 @@ const verifyFBToken = async (req, res, next) => {
   }
 };
 
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.us9qyhi.mongodb.net/?appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -58,8 +59,9 @@ async function run() {
     const loansCollection = db.collection("loans");
     const paymentCollection = db.collection("payments");
     const userCollection = db.collection("users");
+    const addLoansCollection = db.collection("addloans");
 
-    // must be used after verfyFbToken middleware
+    // must be used after verifyFbToken middleware
     const verifyAdmin = async (req, res, next) => {
       const email = req.decoded_email;
       const query = { email };
@@ -70,34 +72,58 @@ async function run() {
       next();
     };
 
+    // Manager token
+
+    const verifyManager = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      if (!user || user.role !== "manager") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    // verify admin or manager
+
+    const verifyAdminOrManager = async (req, res, next) => {
+      const email = req.decoded_email;
+
+      const user = await userCollection.findOne({ email });
+
+      if (user?.role === "admin" || user?.role === "manager") {
+        next();
+      } else {
+        res.status(403).send({ message: "Forbidden Access" });
+      }
+    };
+
     // user related api
 
     app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
       const { searchText, role, status } = req.query;
       const query = {};
       if (searchText) {
-       
         query.$or = [
           { displayName: { $regex: searchText, $options: "i" } },
           { email: { $regex: searchText, $options: "i" } },
         ];
       }
 
-       // filter by role
-  if (role) {
-    query.role = role;
-  }
+      // filter by role
+      if (role) {
+        query.role = role;
+      }
 
-  // filter by status
-  if (status) {
-    query.status = status;
-  }
-
+      // filter by status
+      if (status) {
+        query.status = status;
+      }
 
       const result = await userCollection
-      .find(query)
-      .sort({ createdAt: 1 })
-      .toArray();
+        .find(query)
+        .sort({ createdAt: 1 })
+        .toArray();
 
       res.send(result);
     });
@@ -108,6 +134,20 @@ async function run() {
       const query = { email };
       const user = await userCollection.findOne(query);
       res.send({ role: user?.role || "user" });
+    });
+
+    // get user data for profile
+    // backend/routes/users.js
+
+    app.get("/users/profile/:email", verifyFBToken, async (req, res) => {
+      const { email } = req.params;
+      const user = await userCollection.findOne({ email });
+
+      if (!user) {
+        return res.status(404).send({ message: "User not found" });
+      }
+
+      return res.send(user);
     });
 
     app.post("/users", async (req, res) => {
@@ -171,7 +211,9 @@ async function run() {
     // suspend user api
 
     app.patch(
-      "/users/suspend/:id",verifyFBToken,verifyAdmin,
+      "/users/suspend/:id",
+      verifyFBToken,
+      verifyAdmin,
       async (req, res) => {
         const id = req.params.id;
         const { reason, feedback } = req.body;
@@ -195,14 +237,13 @@ async function run() {
     //  loans api
     app.get("/loans", async (req, res) => {
       const query = {};
-      const { email,status } = req.query;
+      const { email, status } = req.query;
       if (email) {
         query.email = email;
       }
 
-      if(status){
-        query.status = status
-
+      if (status) {
+        query.status = status;
       }
 
       const cursor = loansCollection.find(query);
@@ -223,28 +264,45 @@ async function run() {
       res.send(result);
     });
 
-    app.patch("/loans/:id/status",async (req,res)=>{
-      const {id} = req.params;
-      const {status} = req.body;
+    app.patch(
+      "/loans/:id/status",
+      verifyFBToken,
+      verifyManager,
+      async (req, res) => {
+        const { id } = req.params;
+        const { status } = req.body;
 
-      if(!["approved","rejected"].includes(status)){
-        return res.status(400).send({message:"Invalid Status"});
+        if (!["approved", "rejected"].includes(status)) {
+          return res.status(400).send({ message: "Invalid Status" });
+        }
+
+        const loan = await loansCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!loan) {
+          return res.status(404).send({ message: "loan not found" });
+        }
+
+        if (loan.status === "approved") {
+          return res.status(400).send({ message: "Loan already approved" });
+        }
+
+        const updateData = { status };
+
+        if (status === "approved") {
+          updateData.approveAt = new Date();
+          updateData.approvedBy = req.decoded.email;
+        }
+
+        const result = await loansCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+
+        return res.send(result);
       }
-
-      const updateData = {status};
-      if(status === "approved"){
-        updateData.approveAt = new Date();
-      }
-
-      const result = await loansCollection.updateOne(
-          {_id:new ObjectId(id)},
-          {$set :updateData}
-      );
-
-
-     return res.send(result)
-
-    })
+    );
 
     app.delete("/loans/:id", async (req, res) => {
       const id = req.params.id;
@@ -253,6 +311,140 @@ async function run() {
       const result = await loansCollection.deleteOne(query);
       res.send(result);
     });
+
+    // add Loans api from manager side
+
+    // POST: Add Loan
+    app.post("/addloans", async (req, res) => {
+      try {
+        const loanData = req.body;
+
+        // basic validation
+        if (
+          !loanData.title ||
+          !loanData.category ||
+          !loanData.interestRate ||
+          !loanData.maxLoanLimit ||
+          !loanData.image
+        ) {
+          return res.status(400).send({ message: "Required fields missing" });
+        }
+
+        const newLoan = {
+          title: loanData.title,
+          description: loanData.description || "",
+          category: loanData.category,
+          interestRate: loanData.interestRate,
+          maxLoanLimit: loanData.maxLoanLimit,
+          requiredDocuments: loanData.requiredDocuments || "",
+          emiPlans: loanData.emiPlans || "",
+          image: loanData.image,
+          showOnHome: loanData.showOnHome || false,
+          createdBy: {
+            email: loanData.createdBy.email,
+            name: loanData.createdBy.name || "Unknown",
+          },
+          createdAt: new Date(),
+        };
+
+        const result = await addLoansCollection.insertOne(newLoan);
+
+        return res.send({
+          success: true,
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error(error);
+        return res.status(500).send({ message: "Failed to add loan" });
+      }
+    });
+
+    // get add loan
+
+    app.get("/addloans", async (req, res) => {
+      const result = await addLoansCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/addloans/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const query = { _id: new ObjectId(id) };
+      const result = await addLoansCollection.findOne(query);
+
+      return res.send(result);
+    });
+
+    // Toggle showOnHome
+    app.patch("/addloans/:id/showOnHome", async (req, res) => {
+      const { id } = req.params;
+      const { showOnHome } = req.body;
+
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { showOnHome } };
+
+      const result = await addLoansCollection.updateOne(filter, updateDoc);
+      return res.send(result);
+    });
+
+    // delete add loans
+
+    app.delete(
+      "/addloans/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+
+          const result = await addLoansCollection.deleteOne({
+            _id: new ObjectId(id),
+          });
+
+          if (result.deletedCount === 0) {
+            return res.status(404).send({ message: "Loan not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Loan deleted successfully",
+          });
+        } catch (error) {
+          console.error("Delete loan error:", error);
+          return res.status(500).send({ message: "Failed to delete loan" });
+        }
+      }
+    );
+
+    // update from admin and manager
+
+    app.patch(
+      "/addloans/:id",
+      verifyFBToken,
+      verifyAdminOrManager,
+      async (req, res) => {
+        const { id } = req.params;
+        const updatedLoan = req.body;
+
+        const result = await addLoansCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              title: updatedLoan.title,
+              description: updatedLoan.description,
+              interestRate: updatedLoan.interestRate,
+              category: updatedLoan.category,
+              image: updatedLoan.image,
+              maxLoanLimit: updatedLoan.maxLoanLimit,
+              emiPlans: updatedLoan.emiPlans,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        res.send(result);
+      }
+    );
 
     // payment checkout session
 
@@ -351,7 +543,7 @@ async function run() {
         const update = {
           $set: {
             applicationFeeStatus: "paid",
-            status: 'pending',
+            status: "pending",
           },
         };
         const result = await loansCollection.updateOne(query, update);
