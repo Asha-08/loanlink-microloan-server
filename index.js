@@ -38,7 +38,6 @@ const verifyFBToken = async (req, res, next) => {
   }
 };
 
-
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.us9qyhi.mongodb.net/?appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -362,9 +361,30 @@ async function run() {
     // get add loan
 
     app.get("/addloans", async (req, res) => {
-      const result = await addLoansCollection.find().toArray();
+      const { search } = req.query;
+
+      let query = {};
+
+      if (search) {
+        query = {
+          $or: [
+            { title: { $regex: search, $options: "i" } },
+            { category: { $regex: search, $options: "i" } },
+          ],
+        };
+      }
+
+      const result = await addLoansCollection.find(query).toArray();
       res.send(result);
     });
+
+    // show on home available section
+   app.get("/addloans/home", async (req, res) => {
+  const loans = await addLoansCollection.find({showOnHome: true}).limit(6).toArray();
+  
+  return res.send(loans);
+});
+
 
     app.get("/addloans/:id", async (req, res) => {
       const { id } = req.params;
@@ -392,7 +412,7 @@ async function run() {
     app.delete(
       "/addloans/:id",
       verifyFBToken,
-      verifyAdmin,
+      verifyAdminOrManager,
       async (req, res) => {
         try {
           const { id } = req.params;
