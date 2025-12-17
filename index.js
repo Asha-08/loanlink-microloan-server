@@ -10,7 +10,11 @@ const port = process.env.PORT || 3000;
 
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./loanlink-microloan-firebase-adminsdk.json");
+// const serviceAccount = require("./loanlink-microloan-firebase-adminsdk.json");
+
+const decoded = Buffer.from(process.env.FB_SECRET_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
+
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -97,6 +101,19 @@ async function run() {
       }
     };
 
+    // verifyUser or borrower
+    const verifyUserOrBorrower = async (req, res, next) => {
+      const email = req.decoded_email;
+
+      const user = await userCollection.findOne({ email });
+
+      if (user?.role === "user" || user?.role === "borrower") {
+        next();
+      } else {
+        res.status(403).send({ message: "Forbidden Access" });
+      }
+    };
+
     // user related api
 
     app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
@@ -136,7 +153,7 @@ async function run() {
     });
 
     // get user data for profile
-    // backend/routes/users.js
+    
 
     app.get("/users/profile/:email", verifyFBToken, async (req, res) => {
       const { email } = req.params;
@@ -247,7 +264,7 @@ async function run() {
 
       const cursor = loansCollection.find(query);
       const result = await cursor.toArray();
-      res.send(result);
+       return res.send(result);
     });
 
     app.get("/loans/:id", async (req, res) => {
@@ -257,10 +274,10 @@ async function run() {
       res.send(result);
     });
 
-    app.post("/loans", async (req, res) => {
+    app.post("/loans",verifyFBToken,verifyUserOrBorrower, async (req, res) => {
       const loan = req.body;
       const result = await loansCollection.insertOne(loan);
-      res.send(result);
+      return res.send(result);
     });
 
     app.patch(
@@ -303,7 +320,7 @@ async function run() {
       }
     );
 
-    app.delete("/loans/:id", async (req, res) => {
+    app.delete("/loans/:id",verifyFBToken,verifyUserOrBorrower, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
 
@@ -500,40 +517,7 @@ async function run() {
       res.send({ url: session.url });
     });
 
-    // old
-
-    // app.post('/create-checkout-session', async (req, res) =>{
-    //   const paymentInfo = req.body;
-    //   const amount = parseInt(paymentInfo.cost) * 100;
-    //  const session = await stripe.checkout.sessions.create({
-    //    line_items: [
-    //             {
-    //                 price_data: {
-    //                     currency: 'USD',
-    //                     unit_amount: amount,
-    //                     product_data: {
-    //                         name: `Please pay for: ${paymentInfo.loanTitle}`
-    //                     }
-    //                 },
-    //                 quantity: 1,
-    //             },
-    //         ],
-    //         customer_email: paymentInfo.email,
-    //         mode:'payment',
-    //          metadata: {
-    //             loanId: paymentInfo.loanId,
-    //             loanTitle: paymentInfo.loanTitle
-    //         },
-
-    //         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
-    //         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
-
-    //  })
-
-    //  console.log(session)
-    //  res.send({ url: session.url })
-
-    // })
+   
 
     // payment success
 
@@ -623,10 +607,10 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
