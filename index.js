@@ -166,6 +166,34 @@ async function run() {
       return res.send(user);
     });
 
+    // Update user profile endpoint
+app.patch('/users/profile/:email', async (req, res) => {
+  try {
+    const email = req.params.email;
+    const { displayName, photoURL } = req.body;
+
+    const filter = { email: email };
+    const updateDoc = {
+      $set: {
+        displayName: displayName,
+        photoURL: photoURL,
+        updatedAt: new Date(),
+      }
+    };
+
+    const result = await userCollection.updateOne(filter, updateDoc);
+    
+    if (result.modifiedCount > 0) {
+      res.send({ success: true, message: 'Profile updated successfully' });
+    } else {
+      res.send({ success: false, message: 'No changes made' });
+    }
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).send({ error: 'Failed to update profile' });
+  }
+});
+
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "user";
@@ -608,9 +636,9 @@ async function run() {
 
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!"
-    // );
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
